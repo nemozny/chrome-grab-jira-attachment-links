@@ -1,0 +1,17 @@
+button {
+  background: none!important;
+  border: none;
+  padding: 0!important;
+}
+
+button:hover{
+  text-decoration:underline;
+}
+
+button:active {
+  color: blue;
+}
+
+body{
+  min-width:200px;
+}
