@@ -28,6 +28,14 @@ The plugin runs only on websites with "atlassian" in the URL.
 
 ![config_screenshot](images/screenshot-1.png)
 
+## Third-party cookie error
+Ignore this cookie error the plugin appears to be producing
+![cookie-error](images/cookie-error.png)
+
+The plugin is not using any cookies. This error is related to Google's upcoming changes in cookie privacy controls - [Prepare for third-party cookie restrictions](https://developers.google.com/privacy-sandbox/3pcd).
+
+You can test the new privacy controls by enabling this Chrome configuration option [chrome://flags/#test-third-party-cookie-phaseout](chrome://flags/#test-third-party-cookie-phaseout).
+
 ## TODO
 I don't know if this plugin is any useful, but if there is an interest, I can register the plugin to the Chrome Web Store.
 
