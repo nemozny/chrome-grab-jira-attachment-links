@@ -40,3 +40,7 @@ You can test the new privacy controls by enabling this Chrome configuration opti
 I don't know if this plugin is any useful, but if there is an interest, I can register the plugin to the Chrome Web Store.
 
 ## Credits
+
+
+## Disclaimer
+No animals were harmed, no children or AI labor used during making of this code.
