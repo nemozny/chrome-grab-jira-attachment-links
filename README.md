@@ -44,3 +44,4 @@ I don't know if this plugin is any useful, but if there is an interest, I can re
 
 ## Disclaimer
 No animals were harmed, no children or AI labor used during making of this code.
+(2026) No longer true, AI refactored the code.

@@ -1,182 +1,138 @@
-// Parse the HTML document and find Jira URL and the current ticket ID
-// Server Jira not supported
-function grab_jira_ticket() {
-  let key = null;
-  let url = null;
-
-  console.log(document.baseURI);
-  if (!document.baseURI.includes("atlassian")) {
-    console.log("Jira Attachment Link: Not in Jira");
-    return;
+function grabJiraTicket() {
+  const pageUrl = new URL(document.baseURI);
+  if (!pageUrl.hostname.includes("atlassian")) {
+    return null;
   }
 
-  const title = document.title;
-  let issue_key = title.match(/\[(.+)\]/i);
-
-  if (!title.includes("Issue navigator") && !!issue_key && !!issue_key.length) {
-    key = issue_key[1];
+  const issueKey = document.title.match(/\[([^\]]+)\]/)?.[1];
+  if (document.title.includes("Issue navigator") || !issueKey) {
+    return null;
   }
 
-  let base_url = document.baseURI.match(/(https:\/\/[^/]+)/i);
-  if (typeof (base_url) != 'undefined' && !!base_url && !!base_url.length) {
-    url = base_url[1];
-  }
-
-  if (key == null || url == null) {
-    console.log("Jira Attachment Link: URL or key not found.");
-    return;
-  }
-
-  return { "key": key, "url": url }
+  return { key: issueKey, url: pageUrl.origin };
 }
 
-// Parse text received by XHR into JSON
-function parse_json(text) {
-  let json = null;
+function parseJson(text) {
   try {
-    json = JSON.parse(text);
-    return json;
-  } catch (e) {
-    console.error(e);
+    return JSON.parse(text);
+  } catch (error) {
+    console.error("Jira Attachment Link: Failed to parse response.", error);
     return null;
   }
 }
 
-// Run the Jira REST API and retrieve the response
-function run_query(url, key) {
+function runQuery(url, key) {
+  const endpoint = `${url}/rest/api/latest/issue/${encodeURIComponent(key)}?fields=attachment`;
 
-  let endpoint = `${url}/rest/api/latest/issue/${key}?fields=attachment`;
-  console.log(endpoint);
-
-  // Need to promisify and wait for a result
-  return new Promise(function (resolve, reject) {
+  return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    // addListeners(xhr);
     xhr.open("GET", endpoint, true);
-    xhr.setRequestHeader("Content-Type", "application/json; charset=utf-8");
-
-    xhr.onreadystatechange = function () {
-      if (this.readyState === XMLHttpRequest.DONE) {
-
-        // Request finished. Resolve the promise.
-        if (xhr.responseText.length > 0) {
-          resolve(xhr.responseText);
-        }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300 && xhr.responseText) {
+        resolve(xhr.responseText);
+        return;
       }
-    };
 
-    xhr.send(null);
-  })
+      reject(new Error(`Jira request failed with status ${xhr.status}.`));
+    };
+    xhr.onerror = () => reject(new Error("Jira request failed due to a network error."));
+    xhr.send();
+  });
 }
 
-// Parse JSON for attachments
-function lookup_attachments(json) {
-  if (!json || !Object.keys(json).length || !("fields" in json)) { return []; }
+function lookupAttachments(json) {
+  const attachments = json?.fields?.attachment;
+  if (!Array.isArray(attachments)) {
+    return [];
+  }
 
-  const attachments = json["fields"]["attachment"];
-  if (!attachments || !attachments.length) { return []; }
+  return attachments
+    .filter(({ filename, content }) => filename && content)
+    .map(({ filename, content, created }) => ({
+      filename,
+      content,
+      created: new Date(created),
+    }));
+}
 
-  let result = [];
-  attachments.forEach(a => {
-    result.push({
-      "filename": a["filename"],
-      "content": a["content"],
-      "created": new Date(a["created"])
-    })
+function setStatus(container, message) {
+  container.textContent = message;
+}
+
+function createAttachmentElement({ filename, content }) {
+  const item = document.createElement("div");
+  const copyButton = document.createElement("button");
+  const link = document.createElement("a");
+
+  copyButton.className = "copy";
+  copyButton.type = "button";
+  copyButton.textContent = "Copy";
+  copyButton.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      copyButton.textContent = "Copied";
+    } catch (error) {
+      console.error("Jira Attachment Link: Failed to copy attachment URL.", error);
+      copyButton.textContent = "Copy failed";
+    }
   });
 
-  return result;
+  link.href = content;
+  link.textContent = filename;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  item.append(copyButton, document.createTextNode(" "), link);
+  return item;
 }
 
-// function copy_to_clipboard(elem) {
-//   const url = elem.href;
-//   navigator.clipboard.writeText(url);
-//   alert("Copied the text: " + url);
-// }
+window.addEventListener("load", async () => {
+  const attachmentsContainer = document.getElementById("attachments");
+  if (!attachmentsContainer) {
+    return;
+  }
 
-function create_element(filename, url) {
-  // Violates some CSS policy
-  // return `<a href="${url}">${filename}</a> <button onclick="copy_to_clipboard(this)">Copy link</button><br/>`;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) {
+    setStatus(attachmentsContainer, "Unable to find the active tab.");
+    return;
+  }
 
-  return `[<button class="copy" link="${url}">Copy</button>] <a href="${url}">${filename}</a> <br/>`;
-}
-
-window.addEventListener('load', async () => {
-  // Div to populate with links
-  const div = document.getElementById("attachments");
-
-  let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-  // Execute chrome scripting to access the active chrome tab. Get Jira endpoint and the Jira issue key.
-  let injection_result = null;
+  let injectionResult;
   try {
-    injection_result = await chrome.scripting.executeScript({
+    injectionResult = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: grab_jira_ticket
+      func: grabJiraTicket,
     });
-  } catch(e) {
-    div.innerHTML = "Failed to inject script.";
-    return;
-  };
-
-  // injection_result returns an array, one item for each tab
-  // [{"documentId": "FF5F45E9611F66B1E5B17FAED2D1D2E4",
-  // "frameId": 0,
-  // "result": {
-  //     "key": "FESS-3715",
-  //     "url": "https://siemens-sts.atlassian.net"
-  // }
-  // }]
-
-  if (!injection_result || !injection_result.length) {
-    div.innerHTML = "Not in Jira or Jira URL or ticket key not found.";
+  } catch (error) {
+    console.error("Jira Attachment Link: Failed to inspect active tab.", error);
+    setStatus(attachmentsContainer, "Failed to inspect the active tab.");
     return;
   }
 
-  let key = null;
-  let url = null;
-  const result = injection_result[0]["result"];
-  if (typeof (result) != 'undefined' && !!result && !!Object.keys(result).length) {
-    key = result["key"];
-    url = result["url"];
-  } else {
-    div.innerHTML = "Not in Jira or Jira URL or ticket key not found.";
+  const ticket = injectionResult?.[0]?.result;
+  if (!ticket) {
+    setStatus(attachmentsContainer, "Not a Jira issue page.");
     return;
   }
 
-  // Query the Jira REST API for the issue details
-  const response = await run_query(url, key);
-  if (!!response) {
-    const json = parse_json(response);
+  try {
+    const response = await runQuery(ticket.url, ticket.key);
+    const json = parseJson(response);
     if (!json) {
-      div.innerHTML = "Failed to parse JSON.";
+      setStatus(attachmentsContainer, "Failed to parse Jira's response.");
       return;
     }
 
-    // Parse individual attachments
-    let attachment_list = lookup_attachments(json);
-    if (!attachment_list.length) {
-      div.innerHTML = "No attachments found.";
+    const attachments = lookupAttachments(json)
+      .sort((firstAttachment, secondAttachment) => secondAttachment.created - firstAttachment.created);
+    if (!attachments.length) {
+      setStatus(attachmentsContainer, "No attachments found.");
       return;
     }
 
-    // Sort by created descending
-    attachment_list = attachment_list.sort((a, b) => {
-      b["created"] - a["created"];
-    })
-
-    // Empty the target div and then populate with attachment links
-    div.innerHTML = "";
-    for (let a = 0; a < attachment_list.length; a++) {
-      const attachment = attachment_list[a];
-
-      div.innerHTML += create_element(attachment["filename"], attachment["content"]);
-    }
-
-    document.addEventListener("click", e => {
-      const link = e.target.getAttribute("link"); 
-      navigator.clipboard.writeText(link);
-      e.target.innerHTML = "Copied";
-    })
+    attachmentsContainer.replaceChildren(...attachments.map(createAttachmentElement));
+  } catch (error) {
+    console.error("Jira Attachment Link: Failed to load attachments.", error);
+    setStatus(attachmentsContainer, "Failed to load attachments.");
   }
 });
